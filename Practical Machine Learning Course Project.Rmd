@@ -1,0 +1,119 @@
+#Practical Machine Learning Course Project
+##Ian Fisher - February 28, 2016
+
+##Background
+One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, the goal was to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants.
+
+The goal of this project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. I describing how I built my model, how I used cross validation, what I think the expected out of sample error is, and why I made the choices I did. I will also use my prediction model to predict 20 different test cases.
+
+##Read in data
+```{r}
+#The training data for this project are available here:
+train<-read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv",
+                na.strings=c("NA","#DIV/0!",""))
+
+#The test data are available here:
+test<-read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
+```
+
+##Selecting Features
+My approach here was to remove obviously irrelevent variables, remove zero covariates, remove variables where much of the data was missing and remove highly correlated variables to reduce colinnearity.
+
+```{r}
+#remove irrelevent variables
+
+train1<-train[,-c(1:7)]
+
+#remove zero covariates
+install.packages("caret",
+                 repos="http://cran.ma.imperial.ac.uk/", 
+                 dependencies = c("Depends", "Suggests"))
+library(caret)
+
+zeroc<-nearZeroVar(train1,saveMetrics = TRUE)
+
+zeroc$rnam<-rownames(zeroc)
+
+zeroc1<-zeroc[which(zeroc$nzv==FALSE),]
+zerocvar<-zeroc1$rnam
+
+train2<-train1[,zerocvar]
+
+#remove variables where data is mostly missing
+
+varout<-as.vector(NULL)
+for (i in 1:length(zerocvar)) {
+  vari<-train2[,i]
+  propna<-sum(is.na(vari))/prod(dim(vari))
+  if (propna<0.6) {
+    varout<-c(varout,zerocvar[i])
+    }
+}
+
+#create dataset of potentially useable variables
+train3<-train2[,varout]
+
+#Remove highly correlated variables to minimize colinnearity
+train3a<-train3[,-53]
+correlationMatrix <- cor(train3a)
+
+# find attributes that are highly corrected (ideally >0.7)
+highlyCorrelated <- findCorrelation(correlationMatrix, cutoff=0.7)
+
+#remove highly correlated variables
+train4<-train3[,-highlyCorrelated]
+```
+
+##Cross validation
+
+```{r}
+#split training set into training and testing for cross validation
+inTrain <- createDataPartition(y=train3$classe,p=0.7,list=FALSE)
+training <- train4[inTrain,]
+testing <- train4[-inTrain,]
+```
+
+Approach will be to create a modelling using random forest, another using boosting and a third stacked random forest model using the predictions from the initial random forest and boosting. Accuracy will then be compared to select the preferred final model
+
+```{r}
+set.seed(62433)
+
+tc<-trainControl(method="cv",number = 4)
+
+rf<-train(classe~.,data=training,method="rf",trControl=tc)
+boost<-train(classe~., method="gbm",data=training,trControl=tc,verbose=F)
+
+predrf<-predict(rf,testing)
+predboost<-predict(boost,testing)
+
+comb<-data.frame(rf=predrf,boost=predboost,classe=testing$classe)
+
+rf2<-train(classe~.,data=comb,method="rf",trControl=tc)
+predrf2<-predict(rf2,comb)
+
+#accuracy of stacked model
+confusionMatrix(testing$classe,predrf2)$overall[1]
+#accuracy of random forest model
+confusionMatrix(testing$classe,predrf)$overall[1]
+#accuracy of boosted model
+confusionMatrix(testing$classe,predboost)$overall[1]
+```
+
+Therefore, the random forest model alone seems to be the best model, with an out of sample error of `r 1-as.numeric(confusionMatrix(testing$classe,predrf)$overall[1])`.
+
+##Predictions
+
+The selected model will now be used to predict 20 test observations.
+
+```{r}
+#keep only the variables in test that were used in the model
+
+testcol<-colnames(test)
+mcol<-na.omit(match(varout,testcol))
+dave1<-test[,mcol]
+
+#now predict outcome of 20 test samples
+fp<-predict(rf,dave1)
+```
+
+Predicted values are `r fp`.
